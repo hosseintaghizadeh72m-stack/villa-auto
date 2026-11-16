@@ -160,6 +160,8 @@ async def main():
         data = await tg(c, "getUpdates", timeout=0, allowed_updates=["message", "callback_query"])
         ups = data.get("result", [])
         print("updates:", len(ups))
+        info = (await tg(c, "getWebhookInfo")).get("result", {})
+        print("pending:", info.get("pending_update_count"), "webhook:", bool(info.get("url")))
         for u in ups:
             try:
                 if "callback_query" in u and u["callback_query"]["from"]["id"] == ADMIN:
