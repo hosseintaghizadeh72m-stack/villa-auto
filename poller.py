@@ -98,3 +98,74 @@ async def youtube_draft(c, vid, extra=""):
     body = extra or title
     await send_draft(c, with_tags(f"{body}\n\n🎬 {url}", tags), "photo",
                      f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
+
+async def on_message(c, m):
+    text = m.get("text") or m.get("caption") or ""
+    reply = m.get("reply_to_message")
+    if text.startswith("/"):
+        return await say(c, HELP)
+    # ریپلای روی پیش‌نویس = تعویض کپشن
+    if reply and reply.get("from", {}).get("is_bot") and reply.get("reply_markup") and m.get("text"):
+        if reply.get("text"):
+            await tg(c, "editMessageText", chat_id=ADMIN, message_id=reply["message_id"],
+                     text=with_tags(text)[:4000], reply_markup=KB)
+        else:
+            await tg(c, "editMessageCaption", chat_id=ADMIN, message_id=reply["message_id"],
+                     caption=with_tags(text)[:1024], reply_markup=KB)
+        return
+    urls = URL_RE.findall(text)
+    rest = URL_RE.sub("", text).strip()
+    for k in ("photo", "video", "animation"):
+        if m.get(k):
+            f = m[k][-1]["file_id"] if k == "photo" else m[k]["file_id"]
+            return await send_draft(c, with_tags(text), k, f)
+    for u in urls:
+        mm = YT_RE.search(u)
+        if mm:
+            return await youtube_draft(c, mm.group(1), rest)
+    for u in urls:
+        if IG_RE.search(u):
+            if len(rest) < 10:
+                return await say(c, "از لینک اینستاگرام نمی‌توانم ویدیو بگیرم. خود ویدیو را فوروارد کن، "
+                                    "یا لینک را با متن کپشنش بفرست.")
+            return await send_draft(c, with_tags(rest))
+    if text.strip():
+        return await send_draft(c, with_tags(text))
+
+
+async def on_callback(c, q):
+    m, d = q["message"], q["data"]
+    mid = m["message_id"]
+    await tg(c, "answerCallbackQuery", callback_query_id=q["id"])
+    if d == "ok":
+        # اول دکمه‌ها را برمی‌داریم تا دوبار منتشر نشود
+        await tg(c, "editMessageReplyMarkup", chat_id=ADMIN, message_id=mid, reply_markup={"inline_keyboard": []})
+        r = await tg(c, "copyMessage", chat_id=CHANNEL, from_chat_id=ADMIN, message_id=mid)
+        await say(c, "✅ در کانال منتشر شد." if r.get("ok") else f"❌ انتشار نشد: {r.get('description')}")
+    elif d == "no":
+        await tg(c, "deleteMessage", chat_id=ADMIN, message_id=mid)
+    elif d.startswith("yd:"):
+        await tg(c, "editMessageReplyMarkup", chat_id=ADMIN, message_id=mid, reply_markup={"inline_keyboard": []})
+        await youtube_draft(c, d[3:])
+
+
+async def main():
+    async with httpx.AsyncClient(timeout=40) as c:
+        data = await tg(c, "getUpdates", timeout=0, allowed_updates=["message", "callback_query"])
+        ups = data.get("result", [])
+        print("updates:", len(ups))
+        for u in ups:
+            try:
+                if "callback_query" in u and u["callback_query"]["from"]["id"] == ADMIN:
+                    await on_callback(c, u["callback_query"])
+                elif "message" in u and u["message"]["from"]["id"] == ADMIN:
+                    await on_message(c, u["message"])
+            except Exception as e:  # noqa: BLE001
+                print("error:", type(e).__name__, e)
+                await say(c, f"❌ خطا: {str(e)[:300]}")
+        if ups:
+            await tg(c, "getUpdates", offset=ups[-1]["update_id"] + 1, timeout=0)
+
+
+asyncio.run(main())
+
