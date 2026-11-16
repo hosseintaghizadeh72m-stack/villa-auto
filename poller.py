@@ -99,6 +99,7 @@ async def youtube_draft(c, vid, extra=""):
     await send_draft(c, with_tags(f"{body}\n\n🎬 {url}", tags), "photo",
                      f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
 
+
 async def on_message(c, m):
     text = m.get("text") or m.get("caption") or ""
     reply = m.get("reply_to_message")
@@ -140,7 +141,12 @@ async def on_callback(c, q):
     if d == "ok":
         # اول دکمه‌ها را برمی‌داریم تا دوبار منتشر نشود
         await tg(c, "editMessageReplyMarkup", chat_id=ADMIN, message_id=mid, reply_markup={"inline_keyboard": []})
-        r = await tg(c, "copyMessage", chat_id=CHANNEL, from_chat_id=ADMIN, message_id=mid)
+        cap = m.get("caption")
+        if cap and "➖➖➖" in cap:  # آمار مخصوص مدیر حذف شود
+            r = await tg(c, "copyMessage", chat_id=CHANNEL, from_chat_id=ADMIN, message_id=mid,
+                         caption=cap.split("➖➖➖")[0].strip())
+        else:
+            r = await tg(c, "copyMessage", chat_id=CHANNEL, from_chat_id=ADMIN, message_id=mid)
         await say(c, "✅ در کانال منتشر شد." if r.get("ok") else f"❌ انتشار نشد: {r.get('description')}")
     elif d == "no":
         await tg(c, "deleteMessage", chat_id=ADMIN, message_id=mid)
@@ -168,4 +174,3 @@ async def main():
 
 
 asyncio.run(main())
-
