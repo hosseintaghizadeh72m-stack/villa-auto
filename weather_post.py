@@ -68,8 +68,16 @@ def advice(t):
 
 
 async def build():
-    async with httpx.AsyncClient(timeout=40) as c:
-        days = await _meteo(c)
+    async with httpx.AsyncClient(timeout=20) as c:
+        for i in range(4):
+            try:
+                days = await _meteo(c)
+                break
+            except httpx.HTTPError:
+                if i == 3:
+                    raise
+                await asyncio.sleep(15)
+
     t = days[0]
     lines = [f"🌤 <b>آب‌وهوای امروز {PLACE}</b>", f"📅 {_day(t['date'])}", "",
              f"{t['icon']} <b>{t['text']}</b>",
