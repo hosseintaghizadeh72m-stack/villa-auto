@@ -8,18 +8,22 @@ permissions:
 jobs:
   find:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install httpx
+      - uses: denoland/setup-deno@v2
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: pip install httpx "yt-dlp[default]"
       - run: python yt_find.py
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ADMIN_ID: ${{ secrets.ADMIN_ID }}
+          TREND_COUNT: "10"
+          TREND_FA_SHARE: "0.8"
       - name: ذخیره لیست دیده‌شده‌ها
         run: |
           git config user.name "github-actions"
