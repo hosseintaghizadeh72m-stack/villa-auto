@@ -1,9 +1,8 @@
 """پیشنهاد کلیپ‌های وایرال یوتیوب به مدیر: ۸۰٪ فارسی، ۲۰٪ خارجی.
 رتبه‌بندی: نیمی بیشترین بازدید، نیمی بیشترین سرعت لایک (لایک در ساعت).
-خود ویدیو دانلود و با دکمه «انتشار در کانال» برای مدیر فرستاده می‌شود.
+هر پیشنهاد به‌صورت لینک یوتیوب (با پخش‌کننده‌ی تلگرام) و دکمه «انتشار در کانال» برای مدیر فرستاده می‌شود.
 آمار زیر خط ➖➖➖ فقط برای مدیر است و poller.py هنگام انتشار حذفش می‌کند."""
 import asyncio
-import glob
 import json
 import os
 import re
@@ -11,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from itertools import zip_longest
 
 import httpx
-import yt_dlp
 
 API = "https://www.googleapis.com/youtube/v3"
 KEY = os.environ["YOUTUBE_API_KEY"]
@@ -92,6 +90,7 @@ async def get(c, path, **p):
                 raise
             await asyncio.sleep(10)
 
+
 async def candidates(c):
     since = (datetime.now(timezone.utc) - timedelta(days=DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     ids = {}
@@ -142,58 +141,19 @@ def pick(items, n, taken):
     return out
 
 
-def download(vid):
-    os.makedirs("dl", exist_ok=True)
-    opts = {"format": "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/b[height<=720]/b",
-            "merge_output_format": "mp4", "outtmpl": f"dl/{vid}.%(ext)s", "quiet": True,
-            "no_warnings": True, "noplaylist": True, "max_filesize": 48 * 1024 * 1024}
-    try:
-        with yt_dlp.YoutubeDL(opts) as y:
-            info = y.extract_info(f"https://www.youtube.com/shorts/{vid}", download=True)
-        files = glob.glob(f"dl/{vid}.*")
-        if files:
-            return files[0], info.get("width"), info.get("height")
-    except Exception as e:  # noqa: BLE001
-        print("download failed:", vid, str(e)[:300])
-    return None, None, None
-
-
 async def send(c, v):
     tags = TAG_RE.findall(v["title"] + " " + v["desc"]) + [to_tag(t) for t in v["tags"][:6]]
     tags = [t for t in tags if t][:8]
-    path, w, h = await asyncio.to_thread(download, v["id"])
-    link = "" if path else f"\n🎬 https://youtu.be/{v['id']}"
-    clean = with_tags(f"{v['title']}\n\n🎥 منبع: {v['channel']}{link}", tags)
+    url = f"https://youtu.be/{v['id']}"
+    clean = with_tags(f"{v['title']}\n\n🎬 {url}\n🎥 منبع: {v['channel']}", tags)
     stats = (f"\n\n{MARK}\n📊 فقط برای تو (در کانال نمی‌آید)\n"
-             f"{v['why']} | {'🇮🇷 فارسی' if v['fa'] else '🌍 خارجی'}"
-             f"{'' if path else ' | ⚠️ دانلود نشد'}\n"
-             f"👁 {num(v['views'])} | ❤️ {num(v['likes'])} | ⚡ {num(v['vel'])} لایک در ساعت | ⏱ {v['sec']} ثانیه\n"
-             f"▶️ https://youtu.be/{v['id']}")
-    cap = clean[:1024 - len(stats) - 1] + stats
-    if path:
-        data = {"chat_id": ADMIN, "caption": cap, "reply_markup": json.dumps(KB),
-                "supports_streaming": "true", "duration": str(v["sec"])}
-        if w and h:
-            data.update(width=str(w), height=str(h))
-        try:
-            with open(path, "rb") as f:
-                r = await c.post(f"{TG}/sendVideo", data=data, timeout=300,
-                                 files={"video": (f"{v['id']}.mp4", f, "video/mp4")})
-            print(v["id"], "video", r.status_code, r.text[:150])
-            if r.status_code == 200:
-                return True
-        finally:
-            os.remove(path)
-        return await send_photo(c, v, with_tags(f"{v['title']}\n\n🎥 منبع: {v['channel']}\n🎬 https://youtu.be/{v['id']}", tags), stats)
-    return await send_photo(c, v, clean, stats)
-
-
-async def send_photo(c, v, clean, stats):
-    cap = clean[:1024 - len(stats) - 1] + stats
-    r = await c.post(f"{TG}/sendPhoto", json={
-        "chat_id": ADMIN, "photo": f"https://i.ytimg.com/vi/{v['id']}/hqdefault.jpg",
-        "caption": cap, "reply_markup": KB})
-    print(v["id"], "photo", r.status_code)
+             f"{v['why']} | {'🇮🇷 فارسی' if v['fa'] else '🌍 خارجی'}\n"
+             f"👁 {num(v['views'])} | ❤️ {num(v['likes'])} | ⚡ {num(v['vel'])} لایک در ساعت | ⏱ {v['sec']} ثانیه")
+    text = clean[:4000 - len(stats)] + stats
+    r = await c.post(f"{TG}/sendMessage", json={
+        "chat_id": ADMIN, "text": text, "reply_markup": KB,
+        "link_preview_options": {"url": url}})
+    print(v["id"], "text", r.status_code, r.text[:150])
     return r.status_code == 200
 
 
@@ -210,7 +170,7 @@ async def main():
         print("fresh:", len(fresh), "fa:", len(fa), "global:", len(gl), "chosen:", len(chosen))
         n_fa = sum(v["fa"] for v in chosen)
         text = (f"🎬 {len(chosen)} پیشنهاد تازه ({n_fa} فارسی، {len(chosen) - n_fa} خارجی). "
-                "ویدیوها یکی‌یکی می‌رسند…") if chosen else "کلیپ تازه‌ای برای پیشنهاد پیدا نشد."
+                "لینک‌ها یکی‌یکی می‌رسند…") if chosen else "کلیپ تازه‌ای برای پیشنهاد پیدا نشد."
         await c.post(f"{TG}/sendMessage", json={"chat_id": ADMIN, "text": text})
         for v in chosen:
             try:
