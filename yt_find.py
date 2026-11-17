@@ -52,7 +52,9 @@ def persian(t):
 def num(n):
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f} میلیون".replace(".0 ", " ")
-    return f"{int(n // 1000)} هزار" if n >= 1000 else str(int(n))
+    if n >= 1000:
+        return f"{int(n // 1000)} هزار"
+    return str(int(n))
 
 
 async def get(c, path, **p):
@@ -112,11 +114,3 @@ def pick(items, n, taken):
         for v, why in ((a, "🔥 پربازدید"), (b, "⚡ لایک سریع")):
             if v and v["id"] not in taken and len(out) < n:
                 taken.add(v["id"])
-                v["why"] = why
-                out.append(v)
-    return out
-
-
-def info(v):
-    """توضیح مخصوص مدیر (زیر خط ➖➖➖ در کپشن می‌آید و هنگام انتشار حذف می‌شود)."""
-    return (f"{v['title'][:
