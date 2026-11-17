@@ -1,7 +1,7 @@
-"""پیشنهاد کلیپ‌های وایرال یوتیوب به مدیر: ۸۰٪ فارسی، ۲۰٪ خارجی.
+"""پیشنهاد کلیپ‌های وایرال یوتیوب: ۸۰٪ فارسی، ۲۰٪ خارجی.
 رتبه‌بندی: نیمی بیشترین بازدید، نیمی بیشترین سرعت لایک (لایک در ساعت).
-هر پیشنهاد به‌صورت لینک یوتیوب (با پخش‌کننده‌ی تلگرام) و دکمه «انتشار در کانال» برای مدیر فرستاده می‌شود.
-آمار زیر خط ➖➖➖ فقط برای مدیر است و poller.py هنگام انتشار حذفش می‌کند."""
+دانلود روی گوشی انجام می‌شود (yt_phone.py)؛ این فایل فقط لیست را در queue.json می‌نویسد
+و به مدیر خبر می‌دهد که لیست آماده است."""
 import asyncio
 import json
 import os
@@ -30,14 +30,11 @@ DAYS = int(os.environ.get("TREND_DAYS", "7"))
 MAX_SEC = int(os.environ.get("TREND_MAX_SECONDS", "90"))
 MIN_VIEWS = int(os.environ.get("TREND_MIN_VIEWS", "20000"))
 SEEN_FILE = "seen.json"
-MARK = "➖➖➖"
-KB = {"inline_keyboard": [[{"text": "📢 انتشار در کانال", "callback_data": "ok"},
-                           {"text": "❌ حذف", "callback_data": "no"}]]}
+QUEUE_FILE = "queue.json"
 
 FA = re.compile(r"[\u0600-\u06FF]")
 EN = re.compile(r"[A-Za-z]")
 DUR = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
-TAG_RE = re.compile(r"#[\w\u200c\u0600-\u06FF]+")
 
 
 def seconds(s):
@@ -56,26 +53,6 @@ def num(n):
     if n >= 1_000_000:
         return f"{n / 1_000_000:.1f} میلیون".replace(".0 ", " ")
     return f"{int(n // 1000)} هزار" if n >= 1000 else str(int(n))
-
-
-def to_tag(s):
-    s = re.sub(r"[^\w\u200c\u0600-\u06FF]+", "_", s.strip()).strip("_")
-    return f"#{s}" if s else ""
-
-
-def with_tags(text, extra=()):
-    """متن اصلی + هشتگ‌های خود پست + هشتگ‌های hashtags.txt، بدون تکرار."""
-    try:
-        mine = open("hashtags.txt", encoding="utf-8").read().split()
-    except OSError:
-        mine = []
-    have = {t.lower() for t in TAG_RE.findall(text)}
-    add = []
-    for t in list(extra) + mine:
-        if t and t.lower() not in have:
-            have.add(t.lower())
-            add.append(t)
-    return (text.strip() + ("\n\n" + " ".join(add) if add else "")).strip()
 
 
 async def get(c, path, **p):
@@ -121,7 +98,6 @@ async def candidates(c):
             hours = max((now - pub).total_seconds() / 3600, 1)
             lang = (sn.get("defaultAudioLanguage") or sn.get("defaultLanguage") or "").lower()
             out.append({"id": v["id"], "title": sn.get("title", ""), "channel": sn.get("channelTitle", ""),
-                        "desc": sn.get("description", ""), "tags": sn.get("tags", []),
                         "views": views, "likes": likes, "sec": dur, "vel": likes / hours,
                         "fa": persian(sn.get("title", "")) or lang.startswith("fa")})
     return out
@@ -141,44 +117,6 @@ def pick(items, n, taken):
     return out
 
 
-async def send(c, v):
-    tags = TAG_RE.findall(v["title"] + " " + v["desc"]) + [to_tag(t) for t in v["tags"][:6]]
-    tags = [t for t in tags if t][:8]
-    url = f"https://youtu.be/{v['id']}"
-    clean = with_tags(f"{v['title']}\n\n🎬 {url}\n🎥 منبع: {v['channel']}", tags)
-    stats = (f"\n\n{MARK}\n📊 فقط برای تو (در کانال نمی‌آید)\n"
-             f"{v['why']} | {'🇮🇷 فارسی' if v['fa'] else '🌍 خارجی'}\n"
-             f"👁 {num(v['views'])} | ❤️ {num(v['likes'])} | ⚡ {num(v['vel'])} لایک در ساعت | ⏱ {v['sec']} ثانیه")
-    text = clean[:4000 - len(stats)] + stats
-    r = await c.post(f"{TG}/sendMessage", json={
-        "chat_id": ADMIN, "text": text, "reply_markup": KB,
-        "link_preview_options": {"url": url}})
-    print(v["id"], "text", r.status_code, r.text[:150])
-    return r.status_code == 200
-
-
-async def main():
-    seen = json.load(open(SEEN_FILE)) if os.path.exists(SEEN_FILE) else []
-    async with httpx.AsyncClient(timeout=60) as c:
-        fresh = [v for v in await candidates(c) if v["id"] not in seen]
-        fa = [v for v in fresh if v["fa"]]
-        gl = [v for v in fresh if not v["fa"]]
-        taken = set()
-        chosen = pick(fa, round(COUNT * FA_SHARE), taken)
-        chosen += pick(gl, COUNT - len(chosen), taken)
-        chosen += pick(fa, COUNT - len(chosen), taken)  # اگر خارجی کم بود، با فارسی پر شود
-        print("fresh:", len(fresh), "fa:", len(fa), "global:", len(gl), "chosen:", len(chosen))
-        n_fa = sum(v["fa"] for v in chosen)
-        text = (f"🎬 {len(chosen)} پیشنهاد تازه ({n_fa} فارسی، {len(chosen) - n_fa} خارجی). "
-                "لینک‌ها یکی‌یکی می‌رسند…") if chosen else "کلیپ تازه‌ای برای پیشنهاد پیدا نشد."
-        await c.post(f"{TG}/sendMessage", json={"chat_id": ADMIN, "text": text})
-        for v in chosen:
-            try:
-                if await send(c, v):
-                    seen.append(v["id"])
-            except Exception as e:  # noqa: BLE001
-                print("send failed:", v["id"], type(e).__name__, e)
-    json.dump(seen[-500:], open(SEEN_FILE, "w"))
-
-
-asyncio.run(main())
+def info(v):
+    """توضیح مخصوص مدیر (زیر خط ➖➖➖ در کپشن می‌آید و هنگام انتشار حذف می‌شود)."""
+    return (f"{v['title'][:
