@@ -114,5 +114,46 @@ def pick(items, n, taken):
         for v, why in ((a, "🔥 پربازدید"), (b, "⚡ لایک سریع")):
             if v and v["id"] not in taken and len(out) < n:
                 taken.add(v["id"])
-asyncio.run(main())
+                v["why"] = why
+                out.append(v)
+    return out
 
+
+# --- پایان بخش ۱ ---def info(v):
+    """توضیح مخصوص مدیر (زیر خط ➖➖➖ در کپشن می‌آید و هنگام انتشار حذف می‌شود)."""
+    title = v["title"][:150]
+    kind = "🇮🇷 فارسی" if v["fa"] else "🌍 خارجی"
+    stats = ("👁 " + num(v["views"]) + " | ❤️ " + num(v["likes"]) + " | ⚡ "
+             + num(v["vel"]) + " لایک در ساعت | ⏱ " + str(v["sec"]) + " ثانیه")
+    lines = [title, "🎥 " + v["channel"], v["why"] + " | " + kind, stats]
+    return "\n".join(lines)
+
+
+async def main():
+    seen = json.load(open(SEEN_FILE)) if os.path.exists(SEEN_FILE) else []
+    async with httpx.AsyncClient(timeout=60) as c:
+        fresh = [v for v in await candidates(c) if v["id"] not in seen]
+        fa = [v for v in fresh if v["fa"]]
+        gl = [v for v in fresh if not v["fa"]]
+        taken = set()
+        chosen = pick(fa, round(COUNT * FA_SHARE), taken)
+        chosen += pick(gl, COUNT - len(chosen), taken)
+        chosen += pick(fa, COUNT - len(chosen), taken)
+        print("fresh:", len(fresh), "fa:", len(fa), "global:", len(gl), "chosen:", len(chosen))
+        queue = [{"id": v["id"], "info": info(v)} for v in chosen]
+        json.dump(queue, open(QUEUE_FILE, "w"), ensure_ascii=False)
+        seen += [v["id"] for v in chosen]
+        n_fa = sum(v["fa"] for v in chosen)
+        if chosen:
+            text = ("🎬 " + str(len(chosen)) + " ویدیوی تازه آماده است (" + str(n_fa) + " فارسی، "
+                    + str(len(chosen) - n_fa) + " خارجی).\n"
+                    "در Termux (با فیلترشکن روشن) این را اجرا کن:\n"
+                    "cd ~/villa_bot && python yt_phone.py")
+        else:
+            text = "ویدیوی تازه‌ای برای پیشنهاد پیدا نشد."
+        await c.post(f"{TG}/sendMessage", json={"chat_id": ADMIN, "text": text})
+    json.dump(seen[-500:], open(SEEN_FILE, "w"))
+
+
+asyncio.run(main())
+# --- پایان فایل ---
