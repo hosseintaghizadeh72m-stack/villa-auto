@@ -20,7 +20,7 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ADMIN_ID: ${{ secrets.ADMIN_ID }}
-          TREND_COUNT: "10"
+          TREND_COUNT: "5"
           TREND_FA_SHARE: "0.8"
       - name: ذخیره لیست
         run: |
