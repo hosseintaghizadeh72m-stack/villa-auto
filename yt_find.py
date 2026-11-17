@@ -11,6 +11,12 @@ from itertools import zip_longest
 
 import httpx
 
+def info(v):
+    kind = "🇮🇷 فارسی" if v["fa"] else "🌍 خارجی"
+    stats = ("👁 " + num(v["views"]) + " | ❤️ " + num(v["likes"]) + " | ⚡ "
+             + num(v["vel"]) + " لایک در ساعت | ⏱ " + str(v["sec"]) + " ثانیه")
+    return "\n".join([v["title"], "🎥 " + v["channel"], v["why"] + " | " + kind, stats])
+
 API = "https://www.googleapis.com/youtube/v3"
 KEY = os.environ["YOUTUBE_API_KEY"]
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
