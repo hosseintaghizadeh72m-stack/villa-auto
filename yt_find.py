@@ -114,3 +114,5 @@ def pick(items, n, taken):
         for v, why in ((a, "🔥 پربازدید"), (b, "⚡ لایک سریع")):
             if v and v["id"] not in taken and len(out) < n:
                 taken.add(v["id"])
+asyncio.run(main())
+
