@@ -1,6 +1,7 @@
 """پردازش پیام‌ها و دکمه‌های مدیر (هر ۱۰ دقیقه توسط GitHub Actions).
 محتوا بدون هیچ تغییری (کپشن اصلی) منتشر می‌شود و فقط هشتگ‌های خودمان (hashtags.txt)
-به انتهایش اضافه می‌شود. هشتگ‌های خود پست هم حفظ می‌شود."""
+به انتهایش اضافه می‌شود. هشتگ‌های خود پست هم حفظ می‌شود.
+لینک یوتیوب به‌صورت متن با پخش‌کننده‌ی تلگرام (link preview) فرستاده می‌شود."""
 import asyncio
 import os
 import re
@@ -17,6 +18,7 @@ URL_RE = re.compile(r"https?://\S+")
 YT_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([\w-]{11})")
 IG_RE = re.compile(r"instagram\.com/")
 TAG_RE = re.compile(r"#[\w\u200c\u0600-\u06FF]+")
+MARK = "➖➖➖"
 
 HELP = ("سلام 👋\nبرای ساخت پست:\n"
         "• ویدیو/عکس را (حتی فوروارد شده از اینستاگرام یا کانال دیگر) با کپشنش بفرست\n"
@@ -32,6 +34,12 @@ def my_tags():
         return open("hashtags.txt", encoding="utf-8").read().split()
     except OSError:
         return []
+
+
+def yt_url(s):
+    """اولین لینک یوتیوب داخل متن را به شکل youtu.be برمی‌گرداند (یا رشته‌ی خالی)."""
+    m = YT_RE.search(s or "")
+    return f"https://youtu.be/{m.group(1)}" if m else ""
 
 
 def with_tags(text, extra=()):
@@ -64,7 +72,11 @@ async def say(c, text):
 
 async def send_draft(c, caption, kind="text", file=None):
     if kind == "text":
-        return await tg(c, "sendMessage", chat_id=ADMIN, text=caption[:4000], reply_markup=KB)
+        extra = {}
+        link = yt_url(caption)
+        if link:
+            extra["link_preview_options"] = {"url": link}
+        return await tg(c, "sendMessage", chat_id=ADMIN, text=caption[:4000], reply_markup=KB, **extra)
     if len(caption) > 1024:
         await say(c, "⚠️ کپشن از ۱۰۲۴ حرف بیشتر است و کوتاه شد؛ با ریپلای می‌توانی اصلاحش کنی.")
         caption = caption[:1021] + "…"
@@ -93,11 +105,10 @@ async def youtube_info(c, vid):
 
 
 async def youtube_draft(c, vid, extra=""):
-    url = f"https://www.youtube.com/watch?v={vid}"
+    url = f"https://youtu.be/{vid}"
     title, tags = await youtube_info(c, vid)
     body = extra or title
-    await send_draft(c, with_tags(f"{body}\n\n🎬 {url}", tags), "photo",
-                     f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
+    await send_draft(c, with_tags(f"{body}\n\n🎬 {url}", tags))
 
 
 async def on_message(c, m):
@@ -105,14 +116,17 @@ async def on_message(c, m):
     reply = m.get("reply_to_message")
     if text.startswith("/"):
         return await say(c, HELP)
-    # ریپلای روی پیش‌نویس = تعویض کپشن
+    # ریپلای روی پیش‌نویس = تعویض کپشن (لینک یوتیوب پیش‌نویس حفظ می‌شود)
     if reply and reply.get("from", {}).get("is_bot") and reply.get("reply_markup") and m.get("text"):
+        link = yt_url(reply.get("text") or reply.get("caption") or "")
+        body = text if (not link or link in text) else f"{text}\n\n🎬 {link}"
         if reply.get("text"):
+            extra = {"link_preview_options": {"url": link}} if link else {}
             await tg(c, "editMessageText", chat_id=ADMIN, message_id=reply["message_id"],
-                     text=with_tags(text)[:4000], reply_markup=KB)
+                     text=with_tags(body)[:4000], reply_markup=KB, **extra)
         else:
             await tg(c, "editMessageCaption", chat_id=ADMIN, message_id=reply["message_id"],
-                     caption=with_tags(text)[:1024], reply_markup=KB)
+                     caption=with_tags(body)[:1024], reply_markup=KB)
         return
     urls = URL_RE.findall(text)
     rest = URL_RE.sub("", text).strip()
@@ -142,9 +156,17 @@ async def on_callback(c, q):
         # اول دکمه‌ها را برمی‌داریم تا دوبار منتشر نشود
         await tg(c, "editMessageReplyMarkup", chat_id=ADMIN, message_id=mid, reply_markup={"inline_keyboard": []})
         cap = m.get("caption")
-        if cap and "➖➖➖" in cap:  # آمار مخصوص مدیر حذف شود
+        if m.get("text"):
+            # پیش‌نویس متنی: آمار مخصوص مدیر حذف می‌شود و لینک با پخش‌کننده منتشر می‌شود
+            txt = m["text"].split(MARK)[0].strip()
+            extra = {}
+            link = yt_url(txt)
+            if link:
+                extra["link_preview_options"] = {"url": link}
+            r = await tg(c, "sendMessage", chat_id=CHANNEL, text=txt[:4000], **extra)
+        elif cap and MARK in cap:  # آمار مخصوص مدیر حذف شود
             r = await tg(c, "copyMessage", chat_id=CHANNEL, from_chat_id=ADMIN, message_id=mid,
-                         caption=cap.split("➖➖➖")[0].strip())
+                         caption=cap.split(MARK)[0].strip())
         else:
             r = await tg(c, "copyMessage", chat_id=CHANNEL, from_chat_id=ADMIN, message_id=mid)
         await say(c, "✅ در کانال منتشر شد." if r.get("ok") else f"❌ انتشار نشد: {r.get('description')}")
