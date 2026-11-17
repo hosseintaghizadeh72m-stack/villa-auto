@@ -1,7 +1,6 @@
 """پردازش پیام‌ها و دکمه‌های مدیر (هر ۱۰ دقیقه توسط GitHub Actions).
-محتوا بدون هیچ تغییری (کپشن اصلی) منتشر می‌شود و فقط هشتگ‌های خودمان (hashtags.txt)
-به انتهایش اضافه می‌شود. هشتگ‌های خود پست هم حفظ می‌شود.
-لینک یوتیوب به‌صورت متن با پخش‌کننده‌ی تلگرام (link preview) فرستاده می‌شود."""
+پست یوتیوب در کانال: پخش‌کننده‌ی ویدیو بالا و فقط هشتگ‌های خودمان (hashtags.txt) زیرش.
+لینک، منبع و هشتگ‌های خود یوتیوب در متن کانال نمی‌آید."""
 import asyncio
 import os
 import re
@@ -11,14 +10,15 @@ import httpx
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ADMIN = int(os.environ["ADMIN_ID"])
 CHANNEL = os.environ["CHANNEL_ID"]
-YT_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 TG = f"https://api.telegram.org/bot{TOKEN}"
 
 URL_RE = re.compile(r"https?://\S+")
 YT_RE = re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([\w-]{11})")
 IG_RE = re.compile(r"instagram\.com/")
 TAG_RE = re.compile(r"#[\w\u200c\u0600-\u06FF]+")
+ANCHOR_RE = re.compile(r"🎬 https://youtu\.be/[\w-]{11}")
 MARK = "➖➖➖"
+DONE = set()  # جلوگیری از انتشار تکراری وقتی یک دکمه چند بار زده شود
 
 HELP = ("سلام 👋\nبرای ساخت پست:\n"
         "• ویدیو/عکس را (حتی فوروارد شده از اینستاگرام یا کانال دیگر) با کپشنش بفرست\n"
@@ -42,8 +42,13 @@ def yt_url(s):
     return f"https://youtu.be/{m.group(1)}" if m else ""
 
 
+def preview(link):
+    """پخش‌کننده‌ی ویدیو بالای متن نمایش داده شود."""
+    return {"url": link, "show_above_text": True}
+
+
 def with_tags(text, extra=()):
-    """متن اصلی + هشتگ‌های پست (extra) + هشتگ‌های ما؛ بدون تکرار."""
+    """متن اصلی + هشتگ‌های ما؛ بدون تکرار."""
     text = (text or "").strip()
     have = {t.lower() for t in TAG_RE.findall(text)}
     add = []
@@ -52,6 +57,14 @@ def with_tags(text, extra=()):
             have.add(t.lower())
             add.append(t)
     return (text + ("\n\n" + " ".join(add) if add else "")).strip()
+
+
+def channel_text(txt):
+    """متن نهایی کانال برای پست یوتیوب: فقط هشتگ‌های ما (و متن دلخواه مدیر اگر ریپلای کرده)."""
+    txt = txt.split(MARK)[0].strip()
+    first, _, rest = txt.partition("\n")
+    body = rest.strip() if ANCHOR_RE.fullmatch(first.strip()) else ""
+    return body or " ".join(my_tags()) or "🎬"
 
 
 async def tg(c, method, **p):
@@ -75,7 +88,7 @@ async def send_draft(c, caption, kind="text", file=None):
         extra = {}
         link = yt_url(caption)
         if link:
-            extra["link_preview_options"] = {"url": link}
+            extra["link_preview_options"] = preview(link)
         return await tg(c, "sendMessage", chat_id=ADMIN, text=caption[:4000], reply_markup=KB, **extra)
     if len(caption) > 1024:
         await say(c, "⚠️ کپشن از ۱۰۲۴ حرف بیشتر است و کوتاه شد؛ با ریپلای می‌توانی اصلاحش کنی.")
@@ -84,31 +97,10 @@ async def send_draft(c, caption, kind="text", file=None):
     return await tg(c, field, chat_id=ADMIN, **{kind: file}, caption=caption, reply_markup=KB)
 
 
-def to_tag(s):
-    s = re.sub(r"[^\w\u200c\u0600-\u06FF]+", "_", s.strip()).strip("_")
-    return f"#{s}" if s else ""
-
-
-async def youtube_info(c, vid):
-    """عنوان، کانال و هشتگ‌های خود ویدیو (از API یا oembed)."""
-    if YT_KEY:
-        r = await c.get("https://www.googleapis.com/youtube/v3/videos",
-                        params={"part": "snippet", "id": vid, "key": YT_KEY})
-        if r.status_code == 200 and r.json().get("items"):
-            sn = r.json()["items"][0]["snippet"]
-            tags = TAG_RE.findall(sn.get("title", "") + " " + sn.get("description", ""))
-            tags += [to_tag(t) for t in sn.get("tags", [])[:6]]
-            return sn.get("title", ""), [t for t in tags if t][:8]
-    r = await c.get("https://www.youtube.com/oembed",
-                    params={"url": f"https://www.youtube.com/watch?v={vid}", "format": "json"})
-    return (r.json().get("title", "") if r.status_code == 200 else ""), []
-
-
 async def youtube_draft(c, vid, extra=""):
-    url = f"https://youtu.be/{vid}"
-    title, tags = await youtube_info(c, vid)
-    body = extra or title
-    await send_draft(c, with_tags(f"{body}\n\n🎬 {url}", tags))
+    """خط اول (🎬 لینک) فقط برای مدیر است و هنگام انتشار حذف می‌شود."""
+    text = f"🎬 https://youtu.be/{vid}" + (f"\n\n{extra}" if extra else "")
+    await send_draft(c, with_tags(text))
 
 
 async def on_message(c, m):
@@ -116,17 +108,17 @@ async def on_message(c, m):
     reply = m.get("reply_to_message")
     if text.startswith("/"):
         return await say(c, HELP)
-    # ریپلای روی پیش‌نویس = تعویض کپشن (لینک یوتیوب پیش‌نویس حفظ می‌شود)
+    # ریپلای روی پیش‌نویس = تعویض متن (لینک یوتیوب پیش‌نویس حفظ می‌شود)
     if reply and reply.get("from", {}).get("is_bot") and reply.get("reply_markup") and m.get("text"):
-        link = yt_url(reply.get("text") or reply.get("caption") or "")
-        body = text if (not link or link in text) else f"{text}\n\n🎬 {link}"
         if reply.get("text"):
-            extra = {"link_preview_options": {"url": link}} if link else {}
+            link = yt_url(reply["text"])
+            body = f"🎬 {link}\n\n{text.replace(link, '').strip()}" if link else text
+            extra = {"link_preview_options": preview(link)} if link else {}
             await tg(c, "editMessageText", chat_id=ADMIN, message_id=reply["message_id"],
                      text=with_tags(body)[:4000], reply_markup=KB, **extra)
         else:
             await tg(c, "editMessageCaption", chat_id=ADMIN, message_id=reply["message_id"],
-                     caption=with_tags(body)[:1024], reply_markup=KB)
+                     caption=with_tags(text)[:1024], reply_markup=KB)
         return
     urls = URL_RE.findall(text)
     rest = URL_RE.sub("", text).strip()
@@ -152,18 +144,23 @@ async def on_callback(c, q):
     m, d = q["message"], q["data"]
     mid = m["message_id"]
     await tg(c, "answerCallbackQuery", callback_query_id=q["id"])
+    if d in ("ok", "no"):
+        if mid in DONE:
+            return
+        DONE.add(mid)
     if d == "ok":
         # اول دکمه‌ها را برمی‌داریم تا دوبار منتشر نشود
         await tg(c, "editMessageReplyMarkup", chat_id=ADMIN, message_id=mid, reply_markup={"inline_keyboard": []})
         cap = m.get("caption")
         if m.get("text"):
-            # پیش‌نویس متنی: آمار مخصوص مدیر حذف می‌شود و لینک با پخش‌کننده منتشر می‌شود
-            txt = m["text"].split(MARK)[0].strip()
-            extra = {}
+            txt = m["text"]
             link = yt_url(txt)
             if link:
-                extra["link_preview_options"] = {"url": link}
-            r = await tg(c, "sendMessage", chat_id=CHANNEL, text=txt[:4000], **extra)
+                # پست یوتیوب: پخش‌کننده بالا، فقط هشتگ‌های ما پایین
+                r = await tg(c, "sendMessage", chat_id=CHANNEL, text=channel_text(txt)[:4000],
+                             link_preview_options=preview(link))
+            else:
+                r = await tg(c, "sendMessage", chat_id=CHANNEL, text=txt.split(MARK)[0].strip()[:4000])
         elif cap and MARK in cap:  # آمار مخصوص مدیر حذف شود
             r = await tg(c, "copyMessage", chat_id=CHANNEL, from_chat_id=ADMIN, message_id=mid,
                          caption=cap.split(MARK)[0].strip())
