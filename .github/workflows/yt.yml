@@ -1,7 +1,7 @@
 name: yt-discover
 on:
   schedule:
-    - cron: "0 7 * * *"
+    - cron: "30 20 * * *"
   workflow_dispatch:
 permissions:
   contents: write
