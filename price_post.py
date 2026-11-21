@@ -1,8 +1,9 @@
 """گزارش روزانهٔ قیمت‌ها برای کانال تلگرام.
 
-منبع: TGJU (call5.tgju.org/ajax.json). همهٔ مقدارهای ریالی TGJU به تومان تبدیل می‌شوند (÷10).
+مقدارهای ریالی به تومان تبدیل می‌شوند (÷10). تغییر نسبت به روز قبل از فایل
+price_history.json محاسبه می‌شود (workflow آن را commit می‌کند).
 متغیرهای محیطی: TELEGRAM_BOT_TOKEN, CHANNEL_ID
-اجرای آزمایشی بدون ارسال:  python price_post.py --dry
+اجرای آزمایشی بدون ارسال و بدون ذخیره:  python price_post.py --dry
 """
 import asyncio
 import json
@@ -15,6 +16,8 @@ import httpx
 URL = "https://call5.tgju.org/ajax.json"
 RETRY_DELAYS = [5, 15, 30, 60]          # در مجموع ۵ تلاش
 MAX_AGE_DAYS = 4                         # قدیمی‌تر از این یعنی دادهٔ کهنه
+KEEP_DAYS = 10                           # تعداد روزهای نگه‌داشته‌شده در تاریخچه
+HISTORY = os.environ.get("HISTORY_FILE", "price_history.json")
 TEHRAN = timezone(timedelta(hours=3, minutes=30))
 HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) price-report/1.0"}
 
@@ -58,40 +61,78 @@ def usd(v):
     return f"{v:,.2f}"
 
 
-def build(cur):
-    g18 = num(cur, "geram18")
-    ons = num(cur, "ons")
-    dol = num(cur, "price_dollar_rl")
-    eur = num(cur, "price_eur")
-    aed = num(cur, "price_aed")
-    btc = num(cur, "crypto-bitcoin-irr")
-    eth = num(cur, "crypto-ethereum-irr")
+def change(now, old):
+    """متن تغییر نسبت به روز قبل؛ اگر قیمت قبلی نیست رشتهٔ خالی."""
+    if not old:
+        return ""
+    pct = (now - old) / old * 100
+    if abs(pct) < 0.005:
+        return "  ⚪ ➖ بدون تغییر"
+    icon, arrow = ("🟢", "▲") if pct > 0 else ("🔴", "▼")
+    return f"  {icon} {arrow} {abs(pct):.2f} درصد"
 
+
+def load_history():
+    try:
+        with open(HISTORY, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def baseline(hist, today):
+    """آخرین قیمت‌های ثبت‌شده در روزی قبل از امروز."""
+    days = sorted(d for d in hist if d < today)
+    return hist[days[-1]] if days else {}
+
+
+def save_history(hist, today, values):
+    hist[today] = values
+    for d in sorted(hist)[:-KEEP_DAYS]:
+        del hist[d]
+    with open(HISTORY, "w", encoding="utf-8") as f:
+        json.dump(hist, f, ensure_ascii=False, indent=1, sort_keys=True)
+
+
+def read_values(cur):
+    v = {
+        "g18": num(cur, "geram18"),
+        "ons": num(cur, "ons"),
+        "usd": num(cur, "price_dollar_rl"),
+        "eur": num(cur, "price_eur"),
+        "aed": num(cur, "price_aed"),
+        "btc": num(cur, "crypto-bitcoin-irr"),
+        "eth": num(cur, "crypto-ethereum-irr"),
+    }
     # بررسی منطقی: طلای ۱۸ از روی انس و دلار حدوداً باید همان قیمت باشد
-    calc = ons / 31.1035 * 0.75 * dol
-    if abs(calc - g18) / g18 > 0.15:
-        raise ValueError(f"ناسازگاری قیمت طلا: {calc:,.0f} در برابر {g18:,.0f}")
+    calc = v["ons"] / 31.1035 * 0.75 * v["usd"]
+    if abs(calc - v["g18"]) / v["g18"] > 0.15:
+        raise ValueError(f"ناسازگاری قیمت طلا: {calc:,.0f} در برابر {v['g18']:,.0f}")
+    return v
 
+
+def build(v, prev):
+    ch = lambda k: change(v[k], prev.get(k))
     d = datetime.now(TEHRAN)
     lines = [
         "📊 <b>گزارش قیمت روزانه</b>",
         f"🗓 {d:%Y-%m-%d} | ⏰ {d:%H:%M}",
         "",
         "🥇 <b>طلا</b>",
-        f"   • طلای ۱۸ عیار (هر گرم): <b>{toman(g18)}</b> تومان",
-        f"   • اونس جهانی: <b>{usd(ons)}</b> دلار",
+        f"   • طلای ۱۸ عیار (هر گرم): <b>{toman(v['g18'])}</b> تومان{ch('g18')}",
+        f"   • اونس جهانی: <b>{usd(v['ons'])}</b> دلار{ch('ons')}",
         "",
         "💵 <b>ارز</b>",
-        f"   • دلار آمریکا: <b>{toman(dol)}</b> تومان",
-        f"   • یورو: <b>{toman(eur)}</b> تومان",
-        f"   • درهم امارات: <b>{toman(aed)}</b> تومان",
+        f"   • دلار آمریکا: <b>{toman(v['usd'])}</b> تومان{ch('usd')}",
+        f"   • یورو: <b>{toman(v['eur'])}</b> تومان{ch('eur')}",
+        f"   • درهم امارات: <b>{toman(v['aed'])}</b> تومان{ch('aed')}",
         "",
         "🪙 <b>رمزارز</b>",
-        f"   • بیت‌کوین: <b>{toman(btc)}</b> تومان",
-        f"   • اتریوم: <b>{toman(eth)}</b> تومان",
-        "",
-        "📡 منبع: TGJU",
+        f"   • بیت‌کوین: <b>{toman(v['btc'])}</b> تومان{ch('btc')}",
+        f"   • اتریوم: <b>{toman(v['eth'])}</b> تومان{ch('eth')}",
     ]
+    if prev:
+        lines += ["", "<i>تغییرات نسبت به روز قبل</i>"]
     return "\n".join(lines)
 
 
@@ -119,11 +160,15 @@ async def send(text):
 
 async def main():
     cur = await fetch()
-    text = build(cur)
+    v = read_values(cur)
+    hist = load_history()
+    today = datetime.now(TEHRAN).strftime("%Y-%m-%d")
+    text = build(v, baseline(hist, today))
     print(text)
     if "--dry" in sys.argv:
         return
     await send(text)
+    save_history(hist, today, v)
     print("ارسال شد ✅")
 
 
