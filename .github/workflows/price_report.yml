@@ -1,0 +1,21 @@
+name: price-report
+
+on:
+  schedule:
+    - cron: "30 4 * * *"      # ۰۴:۳۰ UTC = ۰۸:۰۰ تهران
+  workflow_dispatch:           # اجرای دستی
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install httpx
+      - run: python price_post.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
