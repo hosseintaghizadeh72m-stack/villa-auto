@@ -17,6 +17,9 @@ URL = "https://call5.tgju.org/ajax.json"
 RETRY_DELAYS = [5, 15, 30, 60]          # در مجموع ۵ تلاش
 MAX_AGE_DAYS = 4                         # قدیمی‌تر از این یعنی دادهٔ کهنه
 KEEP_DAYS = 10                           # تعداد روزهای نگه‌داشته‌شده در تاریخچه
+TAGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hashtags.txt")
+POST_TAGS = ["#طلا", "#دلار", "#بیتکوین", "#یورو", "#درهم", "#پوند",
+             "#اتریوم", "#سکه", "#اونس_جهانی"]
 HISTORY = os.environ.get("HISTORY_FILE", "price_history.json")
 TEHRAN = timezone(timedelta(hours=3, minutes=30))
 HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) price-report/1.0"}
@@ -101,6 +104,8 @@ def read_values(cur):
         "usd": num(cur, "price_dollar_rl"),
         "eur": num(cur, "price_eur"),
         "aed": num(cur, "price_aed"),
+        "coin": num(cur, "sekee"),
+        "gbp": num(cur, "price_gbp"),
         "btc": num(cur, "crypto-bitcoin-irr"),
         "eth": num(cur, "crypto-ethereum-irr"),
     }
@@ -108,7 +113,26 @@ def read_values(cur):
     calc = v["ons"] / 31.1035 * 0.75 * v["usd"]
     if abs(calc - v["g18"]) / v["g18"] > 0.15:
         raise ValueError(f"ناسازگاری قیمت طلا: {calc:,.0f} در برابر {v['g18']:,.0f}")
+    # سکه امامی حدود ۸.۱۳ گرم طلای ۲۲ عیار (۹۱.۶٪) است؛ مقدار آن باید نزدیک طلای ۱۸ باشد
+    coin_calc = v["g18"] * 8.133 * 0.916 / 0.75
+    if abs(v["coin"] / coin_calc - 1) > 0.25:
+        raise ValueError(f"ناسازگاری قیمت سکه: {v['coin']:,.0f} در برابر {coin_calc:,.0f}")
     return v
+
+
+def hashtags():
+    """هشتگ‌های خود کاربر (hashtags.txt) + هشتگ‌های این پست، بدون تکرار."""
+    try:
+        with open(TAGS_FILE, encoding="utf-8") as f:
+            own = f.read().split()
+    except OSError:
+        print("hashtags.txt پیدا نشد؛ فقط هشتگ‌های پست")
+        own = []
+    out = []
+    for t in own + POST_TAGS:
+        if t.startswith("#") and len(t) > 1 and t not in out:
+            out.append(t)
+    return " ".join(out)
 
 
 def build(v, prev):
@@ -121,11 +145,13 @@ def build(v, prev):
         "🥇 <b>طلا</b>",
         f"   • طلای ۱۸ عیار (هر گرم): <b>{toman(v['g18'])}</b> تومان{ch('g18')}",
         f"   • اونس جهانی: <b>{usd(v['ons'])}</b> دلار{ch('ons')}",
+        f"   • سکه امامی: <b>{toman(v['coin'])}</b> تومان{ch('coin')}",
         "",
         "💵 <b>ارز</b>",
         f"   • دلار آمریکا: <b>{toman(v['usd'])}</b> تومان{ch('usd')}",
         f"   • یورو: <b>{toman(v['eur'])}</b> تومان{ch('eur')}",
         f"   • درهم امارات: <b>{toman(v['aed'])}</b> تومان{ch('aed')}",
+        f"   • پوند انگلیس: <b>{toman(v['gbp'])}</b> تومان{ch('gbp')}",
         "",
         "🪙 <b>رمزارز</b>",
         f"   • بیت‌کوین: <b>{toman(v['btc'])}</b> تومان{ch('btc')}",
@@ -133,6 +159,9 @@ def build(v, prev):
     ]
     if prev:
         lines += ["", "<i>تغییرات نسبت به روز قبل</i>"]
+    tags = hashtags()
+    if tags:
+        lines += ["", tags]
     return "\n".join(lines)
 
 
