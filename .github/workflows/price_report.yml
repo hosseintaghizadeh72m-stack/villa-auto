@@ -5,6 +5,9 @@ on:
     - cron: "30 4 * * *"      # ۰۴:۳۰ UTC = ۰۸:۰۰ تهران
   workflow_dispatch:           # اجرای دستی
 
+permissions:
+  contents: write              # برای ذخیرهٔ price_history.json
+
 jobs:
   report:
     runs-on: ubuntu-latest
@@ -19,3 +22,15 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
+      - name: ذخیرهٔ قیمت‌های امروز
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add price_history.json
+          if git diff --cached --quiet; then
+            echo "تغییری برای ذخیره نیست"
+          else
+            git commit -m "price history"
+            git pull --rebase
+            git push
+          fi
