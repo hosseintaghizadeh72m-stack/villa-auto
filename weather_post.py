@@ -7,6 +7,10 @@ MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرد�
           "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
 WEEKDAYS = ["دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه", "یکشنبه"]
 
+# فاصله‌ی مکث (ثانیه) بعد از هر تلاش ناموفق. تعداد عناصر = تعداد تلاش‌های مجدد.
+# مجموع تلاش‌ها = len(RETRY_DELAYS) + 1 = ۵
+RETRY_DELAYS = [5, 15, 30, 60]
+
 
 def gregorian_to_jalali(gy, gm, gd):
     g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
@@ -53,6 +57,21 @@ async def _meteo(c):
     return out
 
 
+async def fetch_meteo():
+    total = len(RETRY_DELAYS) + 1
+    last_exc = None
+    for attempt in range(total):
+        try:
+            async with httpx.AsyncClient(timeout=20) as c:
+                return await _meteo(c)
+        except httpx.HTTPError as e:
+            last_exc = e
+            print(f"تلاش {attempt + 1} از {total} ناموفق: {type(e).__name__}", flush=True)
+            if attempt < len(RETRY_DELAYS):
+                await asyncio.sleep(RETRY_DELAYS[attempt])
+    raise last_exc
+
+
 def _day(s):
     dt = datetime.strptime(s, "%Y-%m-%d")
     jy, jm, jd = gregorian_to_jalali(dt.year, dt.month, dt.day)
@@ -68,15 +87,7 @@ def advice(t):
 
 
 async def build():
-    async with httpx.AsyncClient(timeout=20) as c:
-        for i in range(4):
-            try:
-                days = await _meteo(c)
-                break
-            except httpx.HTTPError:
-                if i == 3:
-                    raise
-                await asyncio.sleep(15)
+    days = await fetch_meteo()
 
     t = days[0]
     lines = [f"🌤 <b>آب‌وهوای امروز {PLACE}</b>", f"📅 {_day(t['date'])}", "",
@@ -100,4 +111,5 @@ async def main():
         r.raise_for_status()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
