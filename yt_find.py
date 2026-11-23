@@ -41,6 +41,8 @@ QUEUE_FILE = "queue.json"
 
 FA = re.compile(r"[\u0600-\u06FF]")
 EN = re.compile(r"[A-Za-z]")
+PER_LET = re.compile(r"[\u067E\u0686\u0698\u06AF\u06A9\u06CC\u06C0]")
+ARA_LET = re.compile(r"[\u0643\u064A\u0629\u0649\u0623\u0625]")
 DUR = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
 
 
@@ -53,7 +55,10 @@ def seconds(s):
 
 
 def persian(t):
-    return len(FA.findall(t)) >= 3 and len(FA.findall(t)) >= len(EN.findall(t))
+    s = len(FA.findall(t))
+    p = len(PER_LET.findall(t))
+    a = len(ARA_LET.findall(t))
+    return s >= 3 and s >= len(EN.findall(t)) and (a == 0 or p > a)
 
 
 def num(n):
@@ -122,11 +127,10 @@ async def candidates(c):
             views = int(st.get("viewCount", 0) or 0)
             if not 0 < dur <= MAX_SEC or views < MIN_VIEWS:
                 continue
-            lang = (sn.get("defaultAudioLanguage") or sn.get("defaultLanguage") or "").lower()
             out.append({"id": v["id"], "title": sn.get("title", ""),
                         "channel": sn.get("channelTitle", ""), "views": views, "sec": dur,
                         "cat": ids[v["id"]],
-                        "fa": persian(sn.get("title", "")) or lang.startswith("fa")})
+                        "fa": persian(sn.get("title", ""))})
     return out
 
 
