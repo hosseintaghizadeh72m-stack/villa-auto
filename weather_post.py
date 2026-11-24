@@ -2,6 +2,7 @@ import asyncio
 import os
 from datetime import datetime
 import httpx
+import sky
 
 MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
           "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"]
@@ -30,7 +31,7 @@ def gregorian_to_jalali(gy, gm, gd):
     return jy, jm, jd
 
 
-LAT, LON = "36.74", "53.10"
+LAT, LON = "36.8088", "53.1073"
 PLACE = "فرح‌آباد ساری"
 FA = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 fa = lambda x: str(x).translate(FA)
@@ -79,7 +80,7 @@ def _day(s):
 
 
 def advice(t):
-    if t["rain"] >= 50: return "☔ چتر یادت نره!"
+    if t["rain"] >= 50 or t.get("lvl", 0) >= 4: return "☔ چتر یادت نره!"
     if t["tmax"] >= 32: return "🥵 هوا گرمه؛ آب زیاد بخور و کرم ضدآفتاب یادت نره."
     if t["tmax"] <= 10: return "🧥 هوا سرده؛ لباس گرم بپوش."
     if t["wind"] >= 35: return "💨 باد تنده؛ حواست به وسایل بیرون باشه."
@@ -90,6 +91,7 @@ async def build():
     days = await fetch_meteo()
 
     t = days[0]
+    t.update(await sky.today(t["date"], LAT, LON))
     lines = [f"🌤 <b>آب‌وهوای امروز {PLACE}</b>", f"📅 {_day(t['date'])}", "",
              f"{t['icon']} <b>{t['text']}</b>",
              f"🌡 {fa(round(t['tmin']))}° تا {fa(round(t['tmax']))}° درجه",
@@ -97,7 +99,7 @@ async def build():
              f"💨 باد: تا {fa(round(t['wind']))} کیلومتر بر ساعت", "", advice(t), "", "📆 <b>روزهای بعد</b>"]
     for d in days[1:]:
         lines.append(f"{d['icon']} {_day(d['date']).rsplit(' ', 2)[0]}: {fa(round(d['tmin']))}° / {fa(round(d['tmax']))}°  {d['text']}")
-    lines += ["", "<i>منبع: Open-Meteo</i>", "#آب_و_هوا #فرح_آباد"]
+    lines += ["", "#آب_و_هوا #فرح_آباد"]
     return "\n".join(lines)
 
 
